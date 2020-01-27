@@ -183,7 +183,7 @@ namespace ocrisbn
                     if (max > 0)
                     {
                         Console.WriteLine("ISBN: " + isbn);
-                        if (op.Out != "")
+                        if (op.Out != null && op.Out != "")
                         {
                             System.IO.File.WriteAllText(op.Out, isbn);
                             Console.WriteLine("output: " + op.Out);
