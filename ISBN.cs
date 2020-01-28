@@ -27,7 +27,11 @@
                 {
                     sum += (ISBN13[i] - '0') * (i % 2 == 0 ? 1 : 3);
                 }
-                ISBN13 += (10 - sum % 10).ToString();
+                sum = sum % 10;
+                if (sum > 0)
+                    ISBN13 += (10-sum).ToString();
+                else
+                    ISBN13 += "0";
             }
             else
             {
