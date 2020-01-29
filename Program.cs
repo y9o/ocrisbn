@@ -41,13 +41,18 @@ namespace ocrisbn
             [Option('o', "out", Required = false, HelpText = "指定ファイルにISBN13番号を書き出す")]
             public string Out { get; set; }
 
-            [Value(0, MetaName = "Input", Required = true, HelpText = "OCR対象の画像があるフォルダ")]
+            [Value(0, MetaName = "Input", Required = true, HelpText = "OCR対象の画像またはフォルダ")]
             public string Input { get; set; }
         }
         class OcrTxt
         {
             public string Original;
             public string Custom;
+            public OcrTxt()
+            {
+                Original = "";
+                Custom = "";
+            }
         }
         static Options op;
 
@@ -88,11 +93,10 @@ namespace ocrisbn
                 Environment.Exit(1);
             }
 
+            var isbns = new List<ISBN>();
             //指定フォルダ
             if (System.IO.Directory.Exists(op.Input))
             {
-
-                var isbns = new List<ISBN>();
                 var filelist = System.IO.Directory.GetFiles(op.Input);
                 var lastfile = "";
 
@@ -163,6 +167,40 @@ namespace ocrisbn
                         }
                     }
                 }
+            }
+            else if(System.IO.File.Exists(op.Input))
+            {
+                Console.Write("Scan: {0}\n", op.Input);
+                try
+                {
+                    var result = scanFromImage(op.Input, engine);
+                    result.Wait();
+                    var n = result.Result;
+                    if (n.Count > 0)
+                    {
+                        isbns.AddRange(n);
+                    }
+                }
+                catch (Exception e)
+                {
+
+                    if ((UInt32)e.InnerException.HResult == (UInt32)0x88982F50)
+                    {
+                        //画像出ない
+                    }
+                    else
+                    {
+                        Console.Write("error\n{0}\n", e);
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine("対象を指定してください");
+                Environment.Exit(1);
+            }
+            if (isbns.Count > 0)
+            {
                 //HITしたISBNをまとめて
                 var isbnMap = new Dictionary<string, int>();
                 foreach (var isbn in isbns)
@@ -174,7 +212,7 @@ namespace ocrisbn
                     else
                     {
                         isbnMap[isbn.ISBN13] = isbn.Rank;
-                    }
+					}
                 }
                 //ランクが高いISBNを一つ選択する
                 {
@@ -198,11 +236,6 @@ namespace ocrisbn
                         }
                     }
                 }
-            }
-            else
-            {
-                Console.WriteLine("対象フォルダを指定してください");
-                Environment.Exit(1);
             }
         }
         static async Task<List<ISBN>> scanFromImage(string image, OcrEngine engine)
