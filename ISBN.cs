@@ -16,7 +16,17 @@
                     sum += (no[i] - '0') * (13 - i);
                 }
                 sum = 11 - (sum % 11);
-                ISBN10 = no.Substring(3, 9) + sum.ToString();
+                ISBN10 = no.Substring(3, 9);
+                if (sum == 10)
+                {
+                    ISBN10 += "X";
+                }
+                else
+                {
+                    if (sum == 11)
+                        sum = 0;
+                    ISBN10 += sum.ToString();
+                }
             }
             else if (no.Length == 10)
             {
@@ -29,7 +39,7 @@
                 }
                 sum = sum % 10;
                 if (sum > 0)
-                    ISBN13 += (10-sum).ToString();
+                    ISBN13 += (10 - sum).ToString();
                 else
                     ISBN13 += "0";
             }

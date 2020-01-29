@@ -33,6 +33,10 @@ namespace ocrisbn
 
             [Option('s', "stop", Required = false, HelpText = "ISBNを見つけたら残り画像は無視する")]
             public bool Skip { get; set; }
+            [Option("noRotate", Required = false, HelpText = "270度回転して再OCRをしない")]
+            public bool noRotate { get; set; }
+            [Option("noBinarize", Required = false, HelpText = "2値化して再OCRをしない")]
+            public bool noBinarize { get; set; }
 
             [Option('o', "out", Required = false, HelpText = "指定ファイルにISBN13番号を書き出す")]
             public string Out { get; set; }
@@ -40,7 +44,11 @@ namespace ocrisbn
             [Value(0, MetaName = "Input", Required = true, HelpText = "OCR対象の画像があるフォルダ")]
             public string Input { get; set; }
         }
-
+        class OcrTxt
+        {
+            public string Original;
+            public string Custom;
+        }
         static Options op;
 
         static void Main(string[] args)
@@ -97,9 +105,9 @@ namespace ocrisbn
                     Console.Write("Scan: {0}\n", file);
                     try
                     {
-                        var result = scanFromImage(System.IO.Path.GetFullPath(file), engine);
+                        var result = scanFromImage(file, engine);
                         result.Wait();
-                        var n = findISBN(result.Result);
+                        var n = result.Result;
                         if (n.Count > 0)
                         {
                             isbns.AddRange(n);
@@ -135,9 +143,9 @@ namespace ocrisbn
                     Console.Write("Scan: {0}\n", file);
                     try
                     {
-                        var result = scanFromImage(System.IO.Path.GetFullPath(file), engine);
+                        var result = scanFromImage(file, engine);
                         result.Wait();
-                        var n = findISBN(result.Result);
+                        var n = result.Result;
                         if (n.Count > 0)
                             isbns.AddRange(n);
 
@@ -197,98 +205,151 @@ namespace ocrisbn
                 Environment.Exit(1);
             }
         }
-        static async Task<string> scanFromImage(string image, OcrEngine engine)
+        static async Task<List<ISBN>> scanFromImage(string image, OcrEngine engine)
         {
+            var isbns = new List<ISBN>();
+            image = System.IO.Path.GetFullPath(image);
             var file = await StorageFile.GetFileFromPathAsync(image);
             var ret = "";
             using (var stream = await file.OpenReadAsync())
             {
                 var decoder = await BitmapDecoder.CreateAsync(stream);
-                var r = ocrFromBMP(decoder, engine, op.ViewOCR);
-                ret = r.Result;
-                stream.Seek(0);
-                var ro = rotateBMP(decoder);
-                var mem = ro.Result;
-                var rotateDecoder = await BitmapDecoder.CreateAsync(mem);
-                r = ocrFromBMP(rotateDecoder, engine, false);
-                r.Wait();
-                mem.Dispose();
-                ret += r.Result;
-            }
-            return ret;
-        }
-        static async Task<IRandomAccessStream> rotateBMP(BitmapDecoder decoder)
-        {
-            var mem = new InMemoryRandomAccessStream();
-            var encoder = await BitmapEncoder.CreateForTranscodingAsync(mem, decoder);
-            encoder.BitmapTransform.Rotation = BitmapRotation.Clockwise270Degrees;
-            await encoder.FlushAsync();
-            return mem;
-        }
-        static async Task<string> ocrFromBMP(BitmapDecoder decoder, OcrEngine engine, bool view)
-        {
-            string ret = "";
-            using (var bmp = await decoder.GetSoftwareBitmapAsync())
-            {
-                var result = await engine.RecognizeAsync(bmp);
-
-                var list = new List<textLine>();
-                foreach (var tmp in result.Lines)
+                using (var bmp = await decoder.GetSoftwareBitmapAsync())
                 {
-                    foreach (var word in tmp.Words)
+                    var r = await ocrFromBMP(bmp, engine);
+                    if (op.ViewOCR)
                     {
-                        bool flag = false;
-                        for (var i = 0; i < list.Count; i++)
+                        Console.WriteLine(r.Original);
+                    }
+                    var n = findISBN(r);
+                    if (n.Count > 0)
+                    {
+                        if (op.Skip)
+                            return n;
+                        isbns.AddRange(n);
+                    }
+                    if (!op.noRotate)
+                    {
+                        using (var rotateBmp = Bitmap.Rotate270(bmp))
                         {
-                            var t = list[i];
-                            var y1 = Math.Abs(t.Rect.Y - word.BoundingRect.Y);
-                            if (word.BoundingRect.Height - y1 > ((double)word.BoundingRect.Height) * 0.5)
+                            r = await ocrFromBMP(rotateBmp, engine);
+                            if (op.ViewOCR)
                             {
-                                var width = word.BoundingRect.Width / word.Text.Length;
-                                var x1 = (t.Rect.X + t.Rect.Width) - (word.BoundingRect.X - width);
-                                if (x1 >= 0 && x1 < width)
-                                {
-                                    t.Text += word.Text;
-                                    t.Rect = word.BoundingRect;
-                                    list[i] = t;
-                                    flag = true;
-                                }
-
+                                Console.WriteLine("==Rotate270==========");
+                                Console.WriteLine(r.Original);
+                            }
+                            n = findISBN(r);
+                            if (n.Count > 0)
+                            {
+                                if (op.Skip)
+                                    return n;
+                                isbns.AddRange(n);
                             }
                         }
-                        if (!flag)
+                    }
+                    using (var otsu = Bitmap.Binarize(bmp))
+                    {
+                        r = await ocrFromBMP(otsu, engine);
+                        if (op.ViewOCR)
                         {
-                            textLine t;
-                            t.Text = word.Text;
-                            t.Rect = word.BoundingRect;
-                            list.Add(t);
+                            Console.WriteLine("==Binarize ==========");
+                            Console.WriteLine(r.Original);
+                        }
+                        n = findISBN(r);
+                        if (n.Count > 0)
+                        {
+                            if (op.Skip)
+                                return n;
+                            isbns.AddRange(n);
+                        }
+                        if (!op.noRotate)
+                        {
+                            using (var rotateBmp2 = Bitmap.Rotate270(otsu))
+                            {
+                                r = await ocrFromBMP(rotateBmp2, engine);
+                                if (op.ViewOCR)
+                                {
+                                    Console.WriteLine("==Binarize270========");
+                                    Console.WriteLine(r.Original);
+                                }
+                                n = findISBN(r);
+                                if (n.Count > 0)
+                                {
+                                    if (op.Skip)
+                                        return n;
+                                    isbns.AddRange(n);
+                                }
+                            }
                         }
                     }
                 }
-                foreach (var tmp in list)
+            }
+            return isbns;
+        }
+        static async Task<OcrTxt> ocrFromBMP(SoftwareBitmap bmp, OcrEngine engine)
+        {
+            var ret = new OcrTxt();
+            var result = await engine.RecognizeAsync(bmp);
+            var list = new List<textLine>();
+            foreach (var tmp in result.Lines)
+            {
+                foreach (var word in tmp.Words)
                 {
-                    ret += tmp.Text + "\n";
-                }
-                var ret2 = "";
-                foreach (var tmp in result.Lines)
-                {
-                    foreach (var word in tmp.Words)
+                    bool flag = false;
+                    for (var i = 0; i < list.Count; i++)
                     {
-                        ret2 += word.Text;
+                        var t = list[i];
+                        var y1 = Math.Abs(t.Rect.Y - word.BoundingRect.Y);
+                        if (word.BoundingRect.Height - y1 > ((double)word.BoundingRect.Height) * 0.5)
+                        {
+                            var width = word.BoundingRect.Width / word.Text.Length;
+                            var x1 = (t.Rect.X + t.Rect.Width) - (word.BoundingRect.X - width);
+                            if (x1 >= 0 && x1 < width)
+                            {
+                                t.Text += word.Text;
+                                t.Rect = word.BoundingRect;
+                                list[i] = t;
+                                flag = true;
+                            }
+                        }
                     }
-                    ret2 += "\n";
+                    if (!flag)
+                    {
+                        textLine t;
+                        t.Text = word.Text;
+                        t.Rect = word.BoundingRect;
+                        list.Add(t);
+                    }
                 }
-                if (view)
+            }
+            foreach (var tmp in list)
+            {
+                ret.Custom += tmp.Text + "\n";
+            }
+            foreach (var tmp in result.Lines)
+            {
+                foreach (var word in tmp.Words)
                 {
-                    Console.WriteLine(ret2);
+                    ret.Original += word.Text;
                 }
-                ret += ret2;
+                ret.Original += "\n";
             }
             return ret;
         }
-        static Regex regexD = new Regex(@"\D", RegexOptions.Compiled);
-        static Regex regexISBN = new Regex(@"ISBN\D*(?:\d\d\d\D)?\d+\D\d+\D\d+\D\d", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
+        static Regex regexD = new Regex(@"[^0-9xX]", RegexOptions.Compiled);
+        static Regex regexISBNX = new Regex(@"^(\d{3})?\d{9}[\dX]$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        static Regex regexISBN = new Regex(@"ISBN\D*(?:\d\d\d\D)?\d+\D\d+\D\d+\D[\dX]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        static List<ISBN> findISBN(OcrTxt str)
+        {
+            var ret = new List<ISBN>();
+            var r = findISBN(str.Original);
+            if (r.Count > 0)
+                ret.AddRange(r);
+            r = findISBN(str.Custom);
+            if (r.Count > 0)
+                ret.AddRange(r);
+            return ret;
+        }
         static List<ISBN> findISBN(string str)
         {
             var txts = str.Split('\n');
@@ -319,12 +380,14 @@ namespace ocrisbn
         static ISBN isISBN(string txt)
         {
             var no = regexD.Replace(txt, "");
+            if (!regexISBNX.IsMatch(no))
+                return null;
             if (no.Length == 10)
             {
                 int i, s = 0, t = 0;
                 for (i = 0; i < 10; i++)
                 {
-                    t += no[i] - '0';
+                    t += no[i] == 'X' ? 10 : no[i] - '0';
                     s += t;
                 }
                 if (s % 11 == 0)
