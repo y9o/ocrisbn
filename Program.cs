@@ -19,6 +19,7 @@ namespace ocrisbn
         }
         class Options
         {
+
             [Option("head", Required = false, Default = 2, HelpText = "前方ファイル数")]
             public int Head { get; set; }
 
@@ -31,8 +32,12 @@ namespace ocrisbn
             [Option('V', "view", Required = false, HelpText = "OCR結果を表示")]
             public bool ViewOCR { get; set; }
 
+            [Option('f', "find", Required = false, HelpText = "検索文字列 ,区切りでOR検索")]
+            public string Find { get; set; }
+
             [Option('s', "stop", Required = false, HelpText = "ISBNを見つけたら残り画像は無視する")]
             public bool Skip { get; set; }
+
             [Option("noRotate", Required = false, HelpText = "270度回転して再OCRをしない")]
             public bool noRotate { get; set; }
             [Option("noBinarize", Required = false, HelpText = "2値化して再OCRをしない")]
@@ -168,7 +173,7 @@ namespace ocrisbn
                     }
                 }
             }
-            else if(System.IO.File.Exists(op.Input))
+            else if (System.IO.File.Exists(op.Input))
             {
                 Console.Write("Scan: {0}\n", op.Input);
                 try
@@ -212,7 +217,7 @@ namespace ocrisbn
                     else
                     {
                         isbnMap[isbn.ISBN13] = isbn.Rank;
-					}
+                    }
                 }
                 //ランクが高いISBNを一つ選択する
                 {
@@ -238,22 +243,30 @@ namespace ocrisbn
                 }
             }
         }
+
         static async Task<List<ISBN>> scanFromImage(string image, OcrEngine engine)
         {
             var isbns = new List<ISBN>();
             image = System.IO.Path.GetFullPath(image);
             var file = await StorageFile.GetFileFromPathAsync(image);
-            var ret = "";
             using (var stream = await file.OpenReadAsync())
             {
                 var decoder = await BitmapDecoder.CreateAsync(stream);
                 using (var bmp = await decoder.GetSoftwareBitmapAsync())
                 {
                     var r = await ocrFromBMP(bmp, engine);
-                    if (op.ViewOCR)
+                    bool printflag = false;
+                    if (op.ViewOCR || findStr(r.Original))
                     {
+                        printflag = true;
                         Console.WriteLine(r.Original);
                     }
+                    else if (findStr(r.Custom))
+                    {
+                        printflag = true;
+                        Console.WriteLine(r.Custom);
+                    }
+
                     var n = findISBN(r);
                     if (n.Count > 0)
                     {
@@ -266,10 +279,17 @@ namespace ocrisbn
                         using (var rotateBmp = Bitmap.Rotate270(bmp))
                         {
                             r = await ocrFromBMP(rotateBmp, engine);
-                            if (op.ViewOCR)
+                            if (op.ViewOCR || (printflag == false && findStr(r.Original)))
                             {
+                                printflag = true;
                                 Console.WriteLine("==Rotate270==========");
                                 Console.WriteLine(r.Original);
+                            }
+                            else if (printflag == false && findStr(r.Custom))
+                            {
+                                printflag = true;
+                                Console.WriteLine("==Rotate270==========");
+                                Console.WriteLine(r.Custom);
                             }
                             n = findISBN(r);
                             if (n.Count > 0)
@@ -283,10 +303,17 @@ namespace ocrisbn
                     using (var otsu = Bitmap.Binarize(bmp))
                     {
                         r = await ocrFromBMP(otsu, engine);
-                        if (op.ViewOCR)
+                        if (op.ViewOCR || (printflag == false && findStr(r.Original)))
                         {
+                            printflag = true;
                             Console.WriteLine("==Binarize ==========");
                             Console.WriteLine(r.Original);
+                        }
+                        else if (printflag == false && findStr(r.Custom))
+                        {
+                            printflag = true;
+                            Console.WriteLine("==Binarize ==========");
+                            Console.WriteLine(r.Custom);
                         }
                         n = findISBN(r);
                         if (n.Count > 0)
@@ -300,10 +327,15 @@ namespace ocrisbn
                             using (var rotateBmp2 = Bitmap.Rotate270(otsu))
                             {
                                 r = await ocrFromBMP(rotateBmp2, engine);
-                                if (op.ViewOCR)
+                                if (op.ViewOCR || (printflag == false && findStr(r.Original)))
                                 {
                                     Console.WriteLine("==Binarize270========");
                                     Console.WriteLine(r.Original);
+                                }
+                                else if (printflag == false && findStr(r.Custom))
+                                {
+                                    Console.WriteLine("==Binarize270========");
+                                    Console.WriteLine(r.Custom);
                                 }
                                 n = findISBN(r);
                                 if (n.Count > 0)
@@ -472,6 +504,21 @@ namespace ocrisbn
             }
             return null;
         }
+
+        static public bool findStr(string txt)
+        {
+            if (op.Find == null || op.Find == "")
+                return false;
+            foreach (var str in op.Find.Split(','))
+            {
+                if (txt.IndexOf(str) >= 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
     }
 
 }
